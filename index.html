@@ -146,7 +146,7 @@ td{padding:10px 5px;border-top:1px solid var(--line);vertical-align:middle}
     <button id="restoreBtn" class="btn-soft">⬆️ Obnovit zálohu</button>
     <input id="file" type="file" accept=".json" class="hidden">
   </div>
-  <p class="notice">Záloha se hodí při změně telefonu. Data jsou zatím uložená přímo v tomto telefonu.</p>
+  <p class="notice">Kilometry můžeš zadat přímo u každé směny. Záloha se hodí při změně telefonu. Data jsou zatím uložená přímo v tomto telefonu.</p>
 </section>
 </main>
 
@@ -158,6 +158,8 @@ td{padding:10px 5px;border-top:1px solid var(--line);vertical-align:middle}
       <div><label for="editStart">Příchod</label><input id="editStart" type="datetime-local"></div>
       <div><label for="editEnd">Odchod</label><input id="editEnd" type="datetime-local"></div>
     </div>
+    <label for="editKm">Kilometry za směnu</label>
+    <input id="editKm" type="number" min="0" step="1" placeholder="např. 352">
     <div class="dialog-actions">
       <button id="cancelEdit" class="btn-soft">Zrušit</button>
       <button id="saveEdit" class="btn-dark">Uložit změny</button>
@@ -194,7 +196,7 @@ function splitShift(start,end){
  let cursor=start;
  while(cursor<end){
    const d=new Date(cursor),next=new Date(d.getFullYear(),d.getMonth()+1,1).getTime(),partEnd=Math.min(end,next),k=monthKey(cursor),m=ensure(k);
-   if(!m.closed)m.shifts.push({id:(crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random())),start:cursor,end:partEnd});
+   if(!m.closed)m.shifts.push({id:(crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random())),start:cursor,end:partEnd,km:0});
    cursor=partEnd;
  }
 }
@@ -219,10 +221,10 @@ function render(){
  $("monthName").textContent=monthLabel(selectedMonth);
  $("monthState").innerHTML=closed?'<span class="pill lock">🔒 Uzavřený měsíc</span>':'<span class="pill">● Otevřený měsíc</span>';
  $("downloadBtn").disabled=!closed;
- const total=m.shifts.reduce((a,s)=>a+s.end-s.start,0),kms=m.rides.reduce((a,r)=>a+r.meters,0);
+ const total=m.shifts.reduce((a,s)=>a+s.end-s.start,0),kms=m.shifts.reduce((a,s)=>a+Number(s.km||0),0);
  $("sumHours").textContent=duration(total);$("sumPay").textContent=money(total/3600000*RATE);$("sumKm").textContent=km(kms);
  $("shiftCount").textContent=m.shifts.length+" směn";$("rideCount").textContent=m.rides.length+" jízd";
- $("shiftArchive").innerHTML=m.shifts.length?`<table><tr><th>Datum</th><th>Příchod</th><th>Odchod</th><th>Délka</th><th></th></tr>${m.shifts.map(s=>`<tr><td>${new Date(s.start).toLocaleDateString("cs-CZ")}</td><td>${time(s.start)}</td><td>${time(s.end)}</td><td>${duration(s.end-s.start)}</td><td><div class="action-row">${closed?"":`<button class="icon-btn" data-edit="${s.id}">✏️</button><button class="icon-btn delete" data-delete="${s.id}">🗑️</button>`}</div></td></tr>`).join("")}</table>`:'<div class="empty">V tomto měsíci zatím nejsou žádné směny.</div>';
+ $("shiftArchive").innerHTML=m.shifts.length?`<table><tr><th>Datum</th><th>Příchod</th><th>Odchod</th><th>Délka</th><th>Km</th><th></th></tr>${m.shifts.map(s=>`<tr><td>${new Date(s.start).toLocaleDateString("cs-CZ")}</td><td>${time(s.start)}</td><td>${time(s.end)}</td><td>${duration(s.end-s.start)}</td><td><b>${Number(s.km||0).toLocaleString("cs-CZ")} km</b></td><td><div class="action-row">${closed?"":`<button class="icon-btn" data-edit="${s.id}">✏️</button><button class="icon-btn delete" data-delete="${s.id}">🗑️</button>`}</div></td></tr>`).join("")}</table>`:'<div class="empty">V tomto měsíci zatím nejsou žádné směny.</div>';
  $("rideArchive").innerHTML=m.rides.length?`<table><tr><th>Datum</th><th>Ujeto</th></tr>${m.rides.map(r=>`<tr><td>${new Date(r.start).toLocaleDateString("cs-CZ")}</td><td><b>${km(r.meters)}</b></td></tr>`).join("")}</table>`:'<div class="empty">V tomto měsíci zatím nejsou žádné kilometry.</div>';
  const a=data.activeShift;
  $("startBtn").disabled=!!a||closed||selectedMonth!==monthKey(now());
@@ -264,7 +266,7 @@ $("saveRideBtn").onclick=()=>{
 let editingId=null;
 function openEdit(id){
  const m=ensure(selectedMonth),s=m.shifts.find(x=>x.id===id);if(!s||m.closed)return;
- editingId=id;$("editStart").value=localInput(s.start);$("editEnd").value=localInput(s.end);$("dialogBg").classList.add("show");
+ editingId=id;$("editStart").value=localInput(s.start);$("editEnd").value=localInput(s.end);$("editKm").value=Number(s.km||0);$("dialogBg").classList.add("show");
 }
 function closeEdit(){$("dialogBg").classList.remove("show");editingId=null}
 $("cancelEdit").onclick=closeEdit;
@@ -276,7 +278,9 @@ $("saveEdit").onclick=()=>{
  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start){alert("Odchod musí být později než příchod.");return}
  const target=monthKey(start);
  if(target!==selectedMonth){alert("Po změně data by směna patřila do jiného měsíce. Pro jednoduchost ji zatím ponecháme v tomto měsíci.");return}
- s.start=start;s.end=end;save();closeEdit();render();toast("Směna upravena");
+ const kmValue=Number($("editKm").value);
+ if(!Number.isFinite(kmValue)||kmValue<0){alert("Zadej platný počet kilometrů.");return}
+ s.start=start;s.end=end;s.km=Math.round(kmValue);save();closeEdit();render();toast("Směna upravena");
 };
 document.addEventListener("click",e=>{
  const b=e.target.closest("button");if(!b)return;
@@ -291,9 +295,9 @@ document.addEventListener("click",e=>{
  }
 });
 $("downloadBtn").onclick=()=>{
- const m=ensure(selectedMonth),total=m.shifts.reduce((a,s)=>a+s.end-s.start,0),kms=m.rides.reduce((a,r)=>a+r.meters,0);
- let lines=[`PRACOVNÍ HODINY – ${monthLabel(selectedMonth).toUpperCase()}`,"","SOUHRN",`Odpracováno: ${duration(total)}`,`Směn: ${m.shifts.length}`,`Ujeto: ${km(kms)}`,`Výdělek: ${money(total/3600000*RATE)}`,"","SMĚNY","Datum | Příchod | Odchod | Délka"];
- for(const s of m.shifts)lines.push(`${new Date(s.start).toLocaleDateString("cs-CZ")} | ${time(s.start)} | ${time(s.end)} | ${duration(s.end-s.start)}`);
+ const m=ensure(selectedMonth),total=m.shifts.reduce((a,s)=>a+s.end-s.start,0),kms=m.shifts.reduce((a,s)=>a+Number(s.km||0),0);
+ let lines=[`PRACOVNÍ HODINY – ${monthLabel(selectedMonth).toUpperCase()}`,"","SOUHRN",`Odpracováno: ${duration(total)}`,`Směn: ${m.shifts.length}`,`Ujeto: ${km(kms)}`,`Výdělek: ${money(total/3600000*RATE)}`,"","SMĚNY","Datum | Příchod | Odchod | Délka | Km"];
+ for(const s of m.shifts)lines.push(`${new Date(s.start).toLocaleDateString("cs-CZ")} | ${time(s.start)} | ${time(s.end)} | ${duration(s.end-s.start)} | ${Number(s.km||0)} km`);
  lines.push("","KILOMETRY","Datum | Ujeto");
  for(const r of m.rides)lines.push(`${new Date(r.start).toLocaleDateString("cs-CZ")} | ${km(r.meters)}`);
  const blob=new Blob([lines.join("\n")],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");
