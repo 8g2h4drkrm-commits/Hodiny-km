@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#166534">
+<link rel="manifest" href="manifest.json">
+<title>Pracovní hodiny</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#18212b;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+.app{max-width:620px;margin:auto;padding:18px 14px 36px}
+header{padding:8px 2px 14px}h1{margin:0;font-size:28px}h2{font-size:19px;margin:0 0 14px}
+.sub{color:#687587;font-size:13px}.card{background:#fff;border-radius:18px;padding:18px;margin:14px 0;box-shadow:0 4px 18px #18212b0d}
+.big{text-align:center;font-size:42px;font-weight:800;font-variant-numeric:tabular-nums;margin:12px 0}
+.status{text-align:center;padding:5px}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{width:100%;border:0;border-radius:12px;padding:14px 12px;font-size:16px;font-weight:750;cursor:pointer}
+.green{background:#15803d;color:#fff}.red{background:#dc2626;color:#fff}.gray{background:#e9edf2;color:#18212b}.yellow{background:#d97706;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{background:#f2f5f8;border-radius:12px;padding:12px}.stat span{font-size:12px;color:#687587}.stat b{display:block;font-size:21px;margin-top:4px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.month{font-size:18px;font-weight:750}
+input{width:100%;padding:12px;border:1px solid #ccd4df;border-radius:10px;font:inherit}
+label{display:block;font-size:13px;font-weight:650;margin:11px 0 5px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:10px 5px;border-bottom:1px solid #edf0f3}th{color:#687587}
+.scroll{overflow-x:auto}.notice{font-size:12px;line-height:1.5;color:#687587}.locked{color:#9a5b00;font-weight:700}
+.hidden{display:none!important}
+@media(max-width:400px){.stats{grid-template-columns:1fr}.buttons{grid-template-columns:1fr}.big{font-size:36px}}
+</style>
+</head>
+<body>
+<main class="app">
+<header><h1>Pracovní hodiny</h1><div class="sub">250 Kč / hod · mobilní verze</div></header>
+
+<section class="card">
+<div class="status">
+<div id="shiftStatus" class="sub">Směna není spuštěná</div>
+<div id="timer" class="big">00:00:00</div>
+<div id="startInfo" class="sub"></div>
+</div>
+<div id="startPanel">
+<label for="plannedStart">Začátek směny</label>
+<input id="plannedStart" type="datetime-local">
+</div>
+<div class="buttons" style="margin-top:12px">
+<button id="startBtn" class="green">🟢 Příchod</button>
+<button id="stopBtn" class="red" disabled>🔴 Odchod</button>
+</div>
+<p class="notice">Když zapomeneš příchod, před spuštěním můžeš nastavit skutečný čas začátku.</p>
+</section>
+
+<section class="card">
+<h2>🚚 Kilometry</h2>
+<div id="rideStatus" class="sub">Jízda není rozpracovaná</div>
+<div class="big"><span id="kmLive">0</span> <span style="font-size:17px">km</span></div>
+<div id="odoPanel">
+<label for="odoStart">Stav počítadla na začátku</label>
+<input id="odoStart" type="number" min="0" step="1" placeholder="např. 125430">
+</div>
+<div class="buttons" style="margin-top:12px">
+<button id="rideStartBtn" class="green">🚚 Začátek jízdy</button>
+<button id="rideEndBtn" class="red" disabled>Konec jízdy</button>
+</div>
+<div id="odoEndPanel" class="hidden">
+<label for="odoEnd">Stav počítadla na konci</label>
+<input id="odoEnd" type="number" min="0" step="1" placeholder="např. 125782">
+<button id="saveRideBtn" class="green" style="margin-top:10px">Uložit kilometry</button>
+</div>
+</section>
+
+<section class="card">
+<div class="row"><div><div class="month" id="monthName"></div><div class="sub" id="monthState"></div></div><button id="downloadBtn" class="gray" style="width:auto;padding:11px 13px">📥 Přehled</button></div>
+<div class="stats" style="margin-top:14px">
+<div class="stat"><span>Hodiny</span><b id="sumHours">0 h</b></div>
+<div class="stat"><span>Výdělek</span><b id="sumPay">0 Kč</b></div>
+<div class="stat"><span>Kilometry</span><b id="sumKm">0 km</b></div>
+</div>
+</section>
+
+<section class="card">
+<h2>Archiv směn</h2>
+<div class="scroll" id="shiftArchive"></div>
+</section>
+
+<section class="card">
+<h2>Archiv kilometrů</h2>
+<div class="scroll" id="rideArchive"></div>
+</section>
+
+<section class="card">
+<h2>Záloha</h2>
+<div class="buttons">
+<button id="backupBtn" class="gray">Stáhnout zálohu</button>
+<button id="restoreBtn" class="gray">Obnovit zálohu</button>
+<input id="file" type="file" accept=".json" class="hidden">
+</div>
+<p class="notice">Data jsou zatím uložená v telefonu. Záloha je vhodná před změnou telefonu nebo pro jistotu.</p>
+</section>
+</main>
+<script>
+const RATE=250,KEY="pracovni_hodiny_mobile_v4";
+let data={months:{},activeShift:null,activeRide:null};
+try{data={...data,...JSON.parse(localStorage.getItem(KEY)||"{}")};data.months=data.months||{}}catch(e){}
+const $=id=>document.getElementById(id), pad=n=>String(n).padStart(2,"0");
+function now(){return Date.now()}
+function localInput(t){let d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}
+function key(t){let d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}`}
+function label(k){let [y,m]=k.split("-"),names=["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];return `${names[+m-1]} ${y}`}
+function dt(t){return new Date(t).toLocaleString("cs-CZ",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+function money(n){return Math.round(n).toLocaleString("cs-CZ")+" Kč"}
+function mins(ms){return Math.floor(ms/60000)}
+function dur(ms){let m=mins(ms);return `${Math.floor(m/60)} h ${m%60} min`}
+function km(n){return Number(n).toLocaleString("cs-CZ",{maximumFractionDigits:0})+" km"}
+function save(){localStorage.setItem(KEY,JSON.stringify(data))}
+function ensureMonth(k){if(!data.months[k])data.months[k]={closed:false,shifts:[],rides:[]};return data.months[k]}
+let currentKey=key(now());
+function closeOldMonths(){
+ const current=key(now());
+ for(const k of Object.keys(data.months)) if(k<current) data.months[k].closed=true;
+ currentKey=current;ensureMonth(current);save();
+}
+function splitShiftIntoMonths(start,end){
+ // Split an overnight shift at month boundaries so each month gets its correct duration.
+ let cursor=start;
+ while(cursor<end){
+   let d=new Date(cursor), next=new Date(d.getFullYear(),d.getMonth()+1,1).getTime();
+   let partEnd=Math.min(end,next), k=key(cursor), m=ensureMonth(k);
+   if(m.closed){partEnd=cursor;break}
+   m.shifts.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random()),start:cursor,end:partEnd});
+   cursor=partEnd;
+ }
+}
+function splitRide(start,end,meters){
+ // If a ride crosses midnight/month boundary, distribute km by elapsed time.
+ let total=end-start,cursor=start;
+ while(cursor<end){
+   let d=new Date(cursor),next=new Date(d.getFullYear(),d.getMonth()+1,1).getTime();
+   let partEnd=Math.min(end,next),share=total?meters*((partEnd-cursor)/total):0,k=key(cursor),m=ensureMonth(k);
+   if(!m.closed)m.rides.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random()),start:cursor,end:partEnd,meters:share});
+   cursor=partEnd;
+ }
+}
+function render(){
+ closeOldMonths();
+ const m=ensureMonth(currentKey);
+ $("monthName").textContent=label(currentKey);
+ $("monthState").innerHTML=m.closed?'<span class="locked">🔒 Měsíc je uzavřený</span>':'Měsíc je otevřený';
+ $("downloadBtn").disabled=!m.closed;
+ let total=m.shifts.reduce((a,s)=>a+s.end-s.start,0), kms=m.rides.reduce((a,r)=>a+r.meters,0);
+ $("sumHours").textContent=dur(total);$("sumPay").textContent=money(total/3600000*RATE);$("sumKm").textContent=km(kms);
+ $("shiftArchive").innerHTML=m.shifts.length?`<table><tr><th>Datum</th><th>Čas</th><th>Délka</th></tr>${m.shifts.map(s=>`<tr><td>${dt(s.start).split(",")[0]}</td><td>${new Date(s.start).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})}–${new Date(s.end).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})}</td><td>${dur(s.end-s.start)}</td></tr>`).join("")}</table>`:'<div class="notice">Zatím žádná směna.</div>';
+ $("rideArchive").innerHTML=m.rides.length?`<table><tr><th>Datum</th><th>Ujeto</th></tr>${m.rides.map(r=>`<tr><td>${dt(r.start).split(",")[0]}</td><td><b>${km(r.meters)}</b></td></tr>`).join("")}</table>`:'<div class="notice">Zatím žádné kilometry.</div>';
+ const active=data.activeShift;
+ $("startBtn").disabled=!!active||m.closed;$("stopBtn").disabled=!active;
+ $("startPanel").classList.toggle("hidden",!!active);
+ $("shiftStatus").textContent=active?"Směna právě běží":"Směna není spuštěná";
+ $("startInfo").textContent=active?"Začátek: "+dt(active.start):"";
+ $("timer").textContent=active?formatTimer(now()-active.start):"00:00:00";
+ const ar=data.activeRide;
+ $("rideStartBtn").disabled=!!ar||m.closed;$("rideEndBtn").disabled=!ar||ar.finishing;
+ $("odoPanel").classList.toggle("hidden",!!ar);$("odoEndPanel").classList.toggle("hidden",!ar||!ar.finishing);
+ $("rideStatus").textContent=ar?(ar.finishing?"Zadej konečný stav počítadla":"Jízda právě probíhá"):"Jízda není rozpracovaná";
+ $("kmLive").textContent=ar?Math.max(0,(ar.odoEnd||ar.odoStart)-ar.odoStart):"0";
+}
+function formatTimer(ms){let s=Math.max(0,Math.floor(ms/1000));return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`}
+$("plannedStart").value=localInput(now());
+$("startBtn").onclick=()=>{
+ closeOldMonths();let t=new Date($("plannedStart").value).getTime();
+ if(!Number.isFinite(t)||t>now()){alert("Zadej platný začátek, který není v budoucnosti.");return}
+ if(ensureMonth(key(t)).closed){alert("Tento měsíc je už uzavřený.");return}
+ data.activeShift={start:t};save();render()
+};
+$("stopBtn").onclick=()=>{
+ if(!data.activeShift)return;let end=now(),start=data.activeShift.start;
+ if(end<=start){alert("Neplatný čas směny.");return}
+ splitShiftIntoMonths(start,end);data.activeShift=null;save();render()
+};
+$("rideStartBtn").onclick=()=>{
+ closeOldMonths();let s=Number($("odoStart").value);
+ if(!Number.isFinite(s)||s<0){alert("Zadej platný počáteční stav počítadla.");return}
+ data.activeRide={start:now(),odoStart:s,finishing:false};save();render()
+};
+$("rideEndBtn").onclick=()=>{if(!data.activeRide)return;data.activeRide.finishing=true;data.activeRide.end=now();save();render()};
+$("saveRideBtn").onclick=()=>{
+ let r=data.activeRide;if(!r)return;let e=Number($("odoEnd").value);
+ if(!Number.isFinite(e)||e<r.odoStart){alert("Konečný stav musí být stejný nebo vyšší než počáteční.");return}
+ let meters=e-r.odoStart;splitRide(r.start,r.end,meters);data.activeRide=null;save();render()
+};
+$("downloadBtn").onclick=()=>{
+ const m=ensureMonth(currentKey),total=m.shifts.reduce((a,s)=>a+s.end-s.start,0),kms=m.rides.reduce((a,r)=>a+r.meters,0);
+ let lines=[`PRACOVNÍ HODINY – ${label(currentKey).toUpperCase()}`,"","CELKEM",`Odpracováno: ${dur(total)}`,`Směn: ${m.shifts.length}`,`Ujeto: ${km(kms)}`,`Výdělek: ${money(total/3600000*RATE)}`,"","SMĚNY","Datum | Příchod | Odchod | Délka"];
+ for(const s of m.shifts)lines.push(`${new Date(s.start).toLocaleDateString("cs-CZ")} | ${new Date(s.start).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})} | ${new Date(s.end).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})} | ${dur(s.end-s.start)}`);
+ lines.push("","KILOMETRY","Datum | Ujeto");
+ for(const r of m.rides)lines.push(`${new Date(r.start).toLocaleDateString("cs-CZ")} | ${km(r.meters)}`);
+ const blob=new Blob([lines.join("\n")],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`prehled-${currentKey}.txt`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)
+};
+$("backupBtn").onclick=()=>{let b=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="pracovni-hodiny-zaloha.json";a.click()};
+$("restoreBtn").onclick=()=>$("file").click();
+$("file").onchange=async e=>{try{let d=JSON.parse(await e.target.files[0].text());if(!d.months)throw Error();data=d;save();render();alert("Záloha obnovena.")}catch(x){alert("Neplatná záloha.")}};
+closeOldMonths();render();setInterval(()=>{if(data.activeShift){$("timer").textContent=formatTimer(now()-data.activeShift.start)}},1000);
+</script>
+</body>
+</html>
